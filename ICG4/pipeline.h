@@ -8,8 +8,8 @@ class Pipeline
 public:
     Pipeline()
     {
-        m_scale = Vector3f(1.0f, 1.0f, 1.0f);
-        m_worldPos = Vector3f(0.0f, 0.0f, 0.0f);
+        m_scale      = Vector3f(1.0f, 1.0f, 1.0f);
+        m_worldPos   = Vector3f(0.0f, 0.0f, 0.0f);
         m_rotateInfo = Vector3f(0.0f, 0.0f, 0.0f);
     }
 
@@ -36,11 +36,11 @@ public:
 
     void SetPerspectiveProj(float FOV, float Width, float Height, float zNear, float zFar)
     {
-        m_persProj.FOV = FOV;
-        m_persProj.Width = Width;
+        m_persProj.FOV    = FOV;
+        m_persProj.Width  = Width;
         m_persProj.Height = Height;
-        m_persProj.zNear = zNear;
-        m_persProj.zFar = zFar;
+        m_persProj.zNear  = zNear;
+        m_persProj.zFar   = zFar;
     }
 
     void SetCamera(const Vector3f& Pos, const Vector3f& Target, const Vector3f& Up)
@@ -81,3 +81,4 @@ private:
 
 
 #endif	/* PIPELINE_H */
+

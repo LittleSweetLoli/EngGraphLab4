@@ -1,33 +1,21 @@
-#include <math.h>
+﻿#include <math.h>
 #include <GL/glew.h>
 #include <GL/freeglut.h>
-
+#include <Magick++.h> 
+#include "util.h"
 #include "pipeline.h"
 #include "camera.h"
 #include "texture.h"
 #include "lighting_technique.h"
 #include "glut_backend.h"
-#include "util.h"
-#include <Magick++.h>
+#include "mesh.h"
+#include "shadow_map_fbo.h"
+#include "shadow_map_technique.h"
+
+using namespace Magick;
 
 #define WINDOW_WIDTH  1280
 #define WINDOW_HEIGHT 1024
-
-struct Vertex
-{
-    Vector3f m_pos;
-    Vector2f m_tex;
-    Vector3f m_normal;
-
-    Vertex() {}
-
-    Vertex(Vector3f pos, Vector2f tex)
-    {
-        m_pos = pos;
-        m_tex = tex;
-        m_normal = Vector3f(0.0f, 0.0f, 0.0f);
-    }
-};
 
 class Main : public ICallbacks
 {
@@ -35,56 +23,65 @@ public:
 
     Main()
     {
-        m_pGameCamera = NULL;
-        m_pTexture = NULL;
         m_pEffect = NULL;
+        m_pShadowMapTech = NULL;
+        m_pGameCamera = NULL;
+        m_pMesh = NULL;
+        m_pQuad = NULL;
         m_scale = 0.0f;
-        m_directionalLight.Color = Vector3f(1.0f, 1.0f, 1.0f);
-        m_directionalLight.AmbientIntensity = 0.0f;
-        m_directionalLight.DiffuseIntensity = 0.0f;
-        m_directionalLight.Direction = Vector3f(1.0f, 0.0f, 0.0f);
+
+        m_spotLight.AmbientIntensity = 0.0f;
+        m_spotLight.DiffuseIntensity = 0.9f;
+        m_spotLight.Color = Vector3f(1.0f, 1.0f, 1.0f);
+        m_spotLight.Attenuation.Linear = 0.01f;
+        m_spotLight.Position = Vector3f(-20.0, 20.0, 5.0f);
+        m_spotLight.Direction = Vector3f(1.0f, -1.0f, 0.0f);
+        m_spotLight.Cutoff = 20.0f;
     }
 
-    ~Main()
+    virtual ~Main()
     {
-        delete m_pEffect;
-        delete m_pGameCamera;
-        delete m_pTexture;
+        SAFE_DELETE(m_pEffect);
+        SAFE_DELETE(m_pShadowMapTech);
+        SAFE_DELETE(m_pGameCamera);
+        SAFE_DELETE(m_pMesh);
+        SAFE_DELETE(m_pQuad);
     }
 
     bool Init()
     {
-        Vector3f Pos(-10.0f, 10.0f, -10.0f);
-        Vector3f Target(1.0f, -5.0f, 1.0f); //���������� �������
-        Vector3f Up(0.0, 1.0f, 0.0f);
-        m_pGameCamera = new Camera(WINDOW_WIDTH, WINDOW_HEIGHT, Pos, Target, Up);
+        glColor3f(0, 1, 0);
+        if (!m_shadowMapFBO.Init(WINDOW_WIDTH, WINDOW_HEIGHT)) {
+            return false;
+        }
 
-        unsigned int Indices[] = { 0, 2, 1,
-                                   0, 3, 2 };
-
-        CreateIndexBuffer(Indices, sizeof(Indices));
-
-        CreateVertexBuffer(Indices, ARRAY_SIZE_IN_ELEMENTS(Indices));
+        m_pGameCamera = new Camera(WINDOW_WIDTH, WINDOW_HEIGHT);
 
         m_pEffect = new LightingTechnique();
 
-        if (!m_pEffect->Init())
-        {
+        if (!m_pEffect->Init()) {
             printf("Error initializing the lighting technique\n");
             return false;
         }
 
-        m_pEffect->Enable();
+        m_pShadowMapTech = new ShadowMapTechnique();
 
-        m_pEffect->SetTextureUnit(0);
-        Magick::InitializeMagick(nullptr); // <--- added this line
-        m_pTexture = new Texture(GL_TEXTURE_2D, "../x64/test.png");
-
-        if (!m_pTexture->Load()) {
+        if (!m_pShadowMapTech->Init()) {
+            printf("Error initializing the shadow map technique\n");
             return false;
         }
 
-        return true;
+        m_pShadowMapTech->Enable();
+
+        m_pQuad = new Mesh();
+
+        if (!m_pQuad->LoadMesh("C:/Content/quad.obj")) {
+            return false;
+        }
+
+        m_pMesh = new Mesh();
+
+        return m_pMesh->LoadMesh("C:/Content/phoenix_ugv.md2");
     }
 
     void Run()
@@ -94,59 +91,50 @@ public:
 
     virtual void RenderSceneCB()
     {
-        m_pGameCamera->OnRender();
+        m_pGameCamera->OnRender(); //обновление позиции камеры
+        m_scale += 0.05f;
 
-        glClear(GL_COLOR_BUFFER_BIT);
+        ShadowMapPass();
+        RenderPass();
 
-        m_scale += 0.01f;
+        glutSwapBuffers();
+    }
 
-        SpotLight sl[2];
-        sl[0].DiffuseIntensity = 15.0f;
-        sl[0].Color = Vector3f(1.0f, 1.0f, 0.7f);
-        sl[0].Position = Vector3f(-0.0f, -1.9f, -0.0f);
-        sl[0].Direction = Vector3f(sinf(m_scale), 0.0f, cosf(m_scale));
-        sl[0].Attenuation.Linear = 0.1f;
-        sl[0].Cutoff = 20.0f;
+    virtual void ShadowMapPass()
+    {
+        m_shadowMapFBO.BindForWriting(); //привязка FBO
 
-        sl[1].DiffuseIntensity = 5.0f;
-        sl[1].Color = Vector3f(0.0f, 1.0f, 1.0f);
-        sl[1].Position = m_pGameCamera->GetPos();
-        sl[1].Direction = m_pGameCamera->GetTarget();
-        sl[1].Attenuation.Linear = 0.1f;
-        sl[1].Cutoff = 10.0f;
+        glClear(GL_DEPTH_BUFFER_BIT);
+        //устанавливаем класс конвейера для того, что бы рендерить меш
+        Pipeline p;
+        p.Scale(0.2f, 0.2f, 0.2f);
+        p.Rotate(0.0f, m_scale, 0.0f);
+        p.WorldPos(0.0f, 0.0f, 5.0f);
+        p.SetCamera(m_spotLight.Position, m_spotLight.Direction, Vector3f(0.0f, -1.5f, 0.0f));
+        p.SetPerspectiveProj(60.0f, WINDOW_WIDTH, WINDOW_HEIGHT, 1.0f, 50.0f);
+        m_pShadowMapTech->SetWVP(p.GetWVPTrans());
+        m_pMesh->Render();
 
-        m_pEffect->SetSpotLights(2, sl);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+
+    virtual void RenderPass()
+    {
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        //используем модуль текстуры 0 и привязываем карту теней для чтения в модуле 0
+        m_pShadowMapTech->SetTextureUnit(0);
+        m_shadowMapFBO.BindForReading(GL_TEXTURE0);
 
 
         Pipeline p;
-        p.Rotate(0.0f, 0.0f, 0.0f);
-        p.WorldPos(0.0f, 0.0f, 1.0f);
+        //масштабируем квадрат, помещаем перед камерой и рендерим
+        p.Scale(5.0f, 5.0f, 5.0f);
+        p.WorldPos(0.0f, 0.0f, 10.0f);
         p.SetCamera(m_pGameCamera->GetPos(), m_pGameCamera->GetTarget(), m_pGameCamera->GetUp());
-        p.SetPerspectiveProj(60.0f, WINDOW_WIDTH, WINDOW_HEIGHT, 0.1f, 100.0f);
-        m_pEffect->SetWVP(p.GetWVPTrans());
-        const Matrix4f& WorldTransformation = p.GetWorldTrans();
-        m_pEffect->SetWorldMatrix(WorldTransformation);
-        m_pEffect->SetDirectionalLight(m_directionalLight);
-        m_pEffect->SetEyeWorldPos(m_pGameCamera->GetPos());
-        m_pEffect->SetMatSpecularIntensity(10.0f);
-        m_pEffect->SetMatSpecularPower(32);
-
-        glEnableVertexAttribArray(0);
-        glEnableVertexAttribArray(1);
-        glEnableVertexAttribArray(2);
-        glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), 0);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const GLvoid*)12);
-        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const GLvoid*)20);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_IBO);
-        m_pTexture->Bind(GL_TEXTURE0);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-
-        glDisableVertexAttribArray(0);
-        glDisableVertexAttribArray(1);
-        glDisableVertexAttribArray(2);
-
-        glutSwapBuffers();
+        p.SetPerspectiveProj(60.0f, WINDOW_WIDTH, WINDOW_HEIGHT, 1.0f, 50.0f);
+        m_pShadowMapTech->SetWVP(p.GetWVPTrans());
+        m_pQuad->Render();
     }
 
     virtual void IdleCB()
@@ -166,22 +154,6 @@ public:
         case 'q':
             glutLeaveMainLoop();
             break;
-
-        case 'a':
-            m_directionalLight.AmbientIntensity += 0.05f;
-            break;
-
-        case 's':
-            m_directionalLight.AmbientIntensity -= 0.05f;
-            break;
-
-        case 'z':
-            m_directionalLight.DiffuseIntensity += 0.05f;
-            break;
-
-        case 'x':
-            m_directionalLight.DiffuseIntensity -= 0.05f;
-            break;
         }
     }
 
@@ -193,68 +165,22 @@ public:
 
 private:
 
-    void CalcNormals(const unsigned int* pIndices, unsigned int IndexCount,
-        Vertex* pVertices, unsigned int VertexCount) {
-        for (unsigned int i = 0; i < IndexCount; i += 3) {
-            unsigned int Index0 = pIndices[i];
-            unsigned int Index1 = pIndices[i + 1];
-            unsigned int Index2 = pIndices[i + 2];
-            Vector3f v1 = pVertices[Index1].m_pos - pVertices[Index0].m_pos;
-            Vector3f v2 = pVertices[Index2].m_pos - pVertices[Index0].m_pos;
-            Vector3f Normal = v1.Cross(v2);
-            Normal.Normalize();
-
-            pVertices[Index0].m_normal += Normal;
-            pVertices[Index1].m_normal += Normal;
-            pVertices[Index2].m_normal += Normal;
-        }
-
-        for (unsigned int i = 0; i < VertexCount; i++) {
-            pVertices[i].m_normal.Normalize();
-        }
-    }
-
-
-    void CreateVertexBuffer(const unsigned int* pIndices, unsigned int IndexCount)
-    {
-        Vertex Vertices[4] = { Vertex(Vector3f(-10.0f, -2.0f, -10.0f), Vector2f(0.0f, 0.0f)),
-                               Vertex(Vector3f(10.0f, -2.0f, -10.0f), Vector2f(1.0f, 0.0f)),
-                               Vertex(Vector3f(10.0f, -2.0f, 10.0f), Vector2f(1.0f, 1.0f)),
-                               Vertex(Vector3f(-10.0f, -2.0f, 10.0f), Vector2f(0.0f, 1.0f)) };
-
-        unsigned int VertexCount = ARRAY_SIZE_IN_ELEMENTS(Vertices);
-
-        CalcNormals(pIndices, IndexCount, Vertices, VertexCount);
-
-        glGenBuffers(1, &m_VBO);
-        glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(Vertices), Vertices, GL_STATIC_DRAW);
-    }
-
-    void CreateIndexBuffer(const unsigned int* pIndices, unsigned int SizeInBytes)
-    {
-        glGenBuffers(1, &m_IBO);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_IBO);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, SizeInBytes, pIndices, GL_STATIC_DRAW);
-    }
-
-
-    GLuint m_VBO;
-    GLuint m_IBO;
     LightingTechnique* m_pEffect;
-    Texture* m_pTexture;
+    ShadowMapTechnique* m_pShadowMapTech;
     Camera* m_pGameCamera;
     float m_scale;
-    DirectionalLight m_directionalLight;
+    SpotLight m_spotLight;
+    Mesh* m_pMesh;
+    Mesh* m_pQuad;
+    ShadowMapFBO m_shadowMapFBO;
 };
 
 
 int main(int argc, char** argv)
 {
-    Magick::InitializeMagick(*argv);
     GLUTBackendInit(argc, argv);
-
-    if (!GLUTBackendCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, 32, false, "Tutorial 21")) {
+    InitializeMagick(*argv);
+    if (!GLUTBackendCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, 32, false, "OpenGL tutors")) {
         return 1;
     }
 
