@@ -16,7 +16,6 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-//#include <unistd.h>
 #include <stdio.h>
 #include <GL/glew.h>
 #include <GL/freeglut.h>
@@ -95,6 +94,8 @@ bool GLUTBackendCreateWindow(unsigned int Width, unsigned int Height, unsigned i
         return false;
     }
 
+    glutSetCursor(GLUT_CURSOR_NONE);
+     
     return true;
 }
 
