@@ -2,9 +2,9 @@
 
 #include "camera.h"
 
-const static float STEP_SCALE = 0.1f;
+const static float STEP_SCALE = 0.4f;
 const static int MARGIN = 10;
-const double M_PI = 3.14;
+
 Camera::Camera(int WindowWidth, int WindowHeight)
 {
     m_windowWidth  = WindowWidth;

@@ -1,4 +1,3 @@
-
 #ifndef MATH_3D_H
 #define	MATH_3D_H
 

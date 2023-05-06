@@ -1,12 +1,13 @@
 #ifndef MESH_H
 #define MESH_H
 
-#include <map>
-#include <vector>
-#include <GL/glew.h>
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
+
+#include <map>
+#include <vector>
+#include <GL/glew.h>
 
 #include "util.h"
 #include "math_3d.h"

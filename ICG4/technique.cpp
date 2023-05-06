@@ -1,20 +1,18 @@
 #include <stdio.h>
 #include <string.h>
-#include <assert.h>
+
 #include "technique.h"
 
 Technique::Technique(){
     m_shaderProg = 0;
 }
 
-Technique::~Technique()
-{
+Technique::~Technique(){
     for (ShaderObjList::iterator it = m_shaderObjList.begin(); it != m_shaderObjList.end(); it++){
         glDeleteShader(*it);
     }
 
-    if (m_shaderProg != 0)
-    {
+    if (m_shaderProg != 0){
         glDeleteProgram(m_shaderProg);
         m_shaderProg = 0;
     }
@@ -90,8 +88,7 @@ bool Technique::Finalize(){
     }
 
     // Удаляем промежуточные объекты шейдеров, которые были добавлены в программу
-    for (ShaderObjList::iterator it = m_shaderObjList.begin(); it != m_shaderObjList.end(); it++)
-    {
+    for (ShaderObjList::iterator it = m_shaderObjList.begin(); it != m_shaderObjList.end(); it++){
         glDeleteShader(*it);
     }
 
@@ -113,3 +110,23 @@ GLint Technique::GetUniformLocation(const char* pUniformName){
 
     return Location;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

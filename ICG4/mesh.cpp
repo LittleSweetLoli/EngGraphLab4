@@ -1,4 +1,5 @@
 #include <assert.h>
+
 #include "mesh.h"
 
 Mesh::MeshEntry::MeshEntry()
@@ -152,6 +153,13 @@ bool Mesh::InitMaterials(const aiScene* pScene, const std::string& Filename)
                 }
             }
         }
+
+        // Загружаем белую текстуру если модель не имеет собственной
+        // В этом уроке данный фукнционал - рудимент
+        /*if (!m_Textures[i]){
+            m_Textures[i] = new Texture(GL_TEXTURE_2D, "./white.png");
+            Ret = m_Textures[i]->Load();
+        }*/
     }
 
     return Ret;

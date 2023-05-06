@@ -1,19 +1,19 @@
-ï»¿#include <math.h>
+#include <math.h>
 #include <GL/glew.h>
 #include <GL/freeglut.h>
-#include <Magick++.h> 
-#include "util.h"
+
 #include "pipeline.h"
 #include "camera.h"
 #include "texture.h"
 #include "lighting_technique.h"
 #include "glut_backend.h"
+#include "util.h"
 #include "mesh.h"
 #include "shadow_map_fbo.h"
 #include "shadow_map_technique.h"
+#include <Magick++.h> 
 
 using namespace Magick;
-
 #define WINDOW_WIDTH  1280
 #define WINDOW_HEIGHT 1024
 
@@ -23,59 +23,73 @@ public:
 
     Main()
     {
-        m_pEffect = NULL;
-        m_pShadowMapTech = NULL;
+        m_pLightingEffect = NULL;
+        m_pShadowMapEffect = NULL;
         m_pGameCamera = NULL;
         m_pMesh = NULL;
         m_pQuad = NULL;
         m_scale = 0.0f;
+        m_pGroundTex = NULL;
 
-        m_spotLight.AmbientIntensity = 0.0f;
+        m_spotLight.AmbientIntensity = 0.1f;
         m_spotLight.DiffuseIntensity = 0.9f;
         m_spotLight.Color = Vector3f(1.0f, 1.0f, 1.0f);
         m_spotLight.Attenuation.Linear = 0.01f;
-        m_spotLight.Position = Vector3f(-20.0, 20.0, 5.0f);
+        m_spotLight.Position  = Vector3f(-20.0, 20.0, 1.0f);
         m_spotLight.Direction = Vector3f(1.0f, -1.0f, 0.0f);
-        m_spotLight.Cutoff = 20.0f;
+        m_spotLight.Cutoff =  20.0f;
     }
 
     virtual ~Main()
     {
-        SAFE_DELETE(m_pEffect);
-        SAFE_DELETE(m_pShadowMapTech);
+        SAFE_DELETE(m_pLightingEffect);
+        SAFE_DELETE(m_pShadowMapEffect);
         SAFE_DELETE(m_pGameCamera);
         SAFE_DELETE(m_pMesh);
         SAFE_DELETE(m_pQuad);
+        SAFE_DELETE(m_pGroundTex);
     }
 
     bool Init()
     {
-        glColor3f(0, 1, 0);
+        Vector3f Pos(3.0f, 8.0f, -10.0f);
+        Vector3f Target(0.0f, -0.2f, 1.0f);
+        Vector3f Up(0.0, 1.0f, 0.0f);
+
         if (!m_shadowMapFBO.Init(WINDOW_WIDTH, WINDOW_HEIGHT)) {
             return false;
         }
 
-        m_pGameCamera = new Camera(WINDOW_WIDTH, WINDOW_HEIGHT);
+        m_pGameCamera = new Camera(WINDOW_WIDTH, WINDOW_HEIGHT, Pos, Target, Up);
 
-        m_pEffect = new LightingTechnique();
+        m_pLightingEffect = new LightingTechnique();
 
-        if (!m_pEffect->Init()) {
+        if (!m_pLightingEffect->Init()) {
             printf("Error initializing the lighting technique\n");
             return false;
         }
 
-        m_pShadowMapTech = new ShadowMapTechnique();
+        m_pLightingEffect->Enable();
+        m_pLightingEffect->SetSpotLights(1, &m_spotLight);
+        m_pLightingEffect->SetTextureUnit(0);
+        m_pLightingEffect->SetShadowMapTextureUnit(1);
 
-        if (!m_pShadowMapTech->Init()) {
+        m_pShadowMapEffect = new ShadowMapTechnique();
+
+        if (!m_pShadowMapEffect->Init()) {
             printf("Error initializing the shadow map technique\n");
             return false;
         }
 
-        m_pShadowMapTech->Enable();
-
         m_pQuad = new Mesh();
 
         if (!m_pQuad->LoadMesh("C:/Content/quad.obj")) {
+            return false;
+        }
+
+        m_pGroundTex = new Texture(GL_TEXTURE_2D, "C:/Content/test.png");
+
+        if (!m_pGroundTex->Load()) {
             return false;
         }
 
@@ -91,28 +105,30 @@ public:
 
     virtual void RenderSceneCB()
     {
-        m_pGameCamera->OnRender(); //Ð¾Ð±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ð¿Ð¾Ð·Ð¸Ñ†Ð¸Ð¸ ÐºÐ°Ð¼ÐµÑ€Ñ‹
-        m_scale += 0.05f;
+        m_pGameCamera->OnRender(); //êàìåðà
+        m_scale += 0.2f; //êîýô ìàñøòàáèðîâàíèÿ
 
-        ShadowMapPass();
-        RenderPass();
+        ShadowMapPass(); //ïðîõîä äëÿ òåíåé
+        RenderPass(); //ïðîõîä ðåíäåðà
 
         glutSwapBuffers();
     }
 
     virtual void ShadowMapPass()
     {
-        m_shadowMapFBO.BindForWriting(); //Ð¿Ñ€Ð¸Ð²ÑÐ·ÐºÐ° FBO
+        m_shadowMapFBO.BindForWriting();
 
         glClear(GL_DEPTH_BUFFER_BIT);
-        //ÑƒÑÑ‚Ð°Ð½Ð°Ð²Ð»Ð¸Ð²Ð°ÐµÐ¼ ÐºÐ»Ð°ÑÑ ÐºÐ¾Ð½Ð²ÐµÐ¹ÐµÑ€Ð° Ð´Ð»Ñ Ñ‚Ð¾Ð³Ð¾, Ñ‡Ñ‚Ð¾ Ð±Ñ‹ Ñ€ÐµÐ½Ð´ÐµÑ€Ð¸Ñ‚ÑŒ Ð¼ÐµÑˆ
+        //ðàçðåøàåì ìåòîä îòîáðàæåíèÿ òåíåé êàæäûé ðàç
+        m_pShadowMapEffect->Enable(); 
+
         Pipeline p;
-        p.Scale(0.2f, 0.2f, 0.2f);
+        p.Scale(0.1f, 0.1f, 0.1f);
         p.Rotate(0.0f, m_scale, 0.0f);
         p.WorldPos(0.0f, 0.0f, 5.0f);
-        p.SetCamera(m_spotLight.Position, m_spotLight.Direction, Vector3f(0.0f, -1.5f, 0.0f));
+        p.SetCamera(m_spotLight.Position, m_spotLight.Direction, Vector3f(0.0f, 1.0f, 0.0f));
         p.SetPerspectiveProj(60.0f, WINDOW_WIDTH, WINDOW_HEIGHT, 1.0f, 50.0f);
-        m_pShadowMapTech->SetWVP(p.GetWVPTrans());
+        m_pShadowMapEffect->SetWVP(p.GetWVPTrans());
         m_pMesh->Render();
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -121,20 +137,36 @@ public:
     virtual void RenderPass()
     {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        //Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐµÐ¼ Ð¼Ð¾Ð´ÑƒÐ»ÑŒ Ñ‚ÐµÐºÑÑ‚ÑƒÑ€Ñ‹ 0 Ð¸ Ð¿Ñ€Ð¸Ð²ÑÐ·Ñ‹Ð²Ð°ÐµÐ¼ ÐºÐ°Ñ€Ñ‚Ñƒ Ñ‚ÐµÐ½ÐµÐ¹ Ð´Ð»Ñ Ñ‡Ñ‚ÐµÐ½Ð¸Ñ Ð² Ð¼Ð¾Ð´ÑƒÐ»Ðµ 0
-        m_pShadowMapTech->SetTextureUnit(0);
-        m_shadowMapFBO.BindForReading(GL_TEXTURE0);
-
-
+        //çàìåíÿåì ìåòîä òåíåé íà ñâåò
+        m_pLightingEffect->Enable();
+        //ïðèâÿçûâàåì êàðòó òåíåé äëÿ ÷òåíèÿ â ìîäóëü òåêñòóð 1
+        m_shadowMapFBO.BindForReading(GL_TEXTURE1);
+        //ðåíäåðèì ïëîñêîñòü òàê, ÷òî áû îíà ñëóæèëà çåìëåé, íà êîòîðóþ ïàäàåò òåíü
         Pipeline p;
-        //Ð¼Ð°ÑÑˆÑ‚Ð°Ð±Ð¸Ñ€ÑƒÐµÐ¼ ÐºÐ²Ð°Ð´Ñ€Ð°Ñ‚, Ð¿Ð¾Ð¼ÐµÑ‰Ð°ÐµÐ¼ Ð¿ÐµÑ€ÐµÐ´ ÐºÐ°Ð¼ÐµÑ€Ð¾Ð¹ Ð¸ Ñ€ÐµÐ½Ð´ÐµÑ€Ð¸Ð¼
-        p.Scale(5.0f, 5.0f, 5.0f);
-        p.WorldPos(0.0f, 0.0f, 10.0f);
-        p.SetCamera(m_pGameCamera->GetPos(), m_pGameCamera->GetTarget(), m_pGameCamera->GetUp());
         p.SetPerspectiveProj(60.0f, WINDOW_WIDTH, WINDOW_HEIGHT, 1.0f, 50.0f);
-        m_pShadowMapTech->SetWVP(p.GetWVPTrans());
+        p.Scale(10.0f, 10.0f, 10.0f);
+        p.WorldPos(0.0f, 0.0f, 1.0f);
+        p.Rotate(90.0f, 0.0f, 0.0f);
+        p.SetCamera(m_pGameCamera->GetPos(), m_pGameCamera->GetTarget(), m_pGameCamera->GetUp());
+
+        m_pLightingEffect->SetWVP(p.GetWVPTrans());
+        m_pLightingEffect->SetWorldMatrix(p.GetWorldTrans());
+        p.SetCamera(m_spotLight.Position, m_spotLight.Direction, Vector3f(0.0f, 1.0f, 0.0f));
+        m_pLightingEffect->SetLightWVP(p.GetWVPTrans());
+        m_pLightingEffect->SetEyeWorldPos(m_pGameCamera->GetPos());
+        m_pGroundTex->Bind(GL_TEXTURE0);
         m_pQuad->Render();
+
+        p.Scale(0.1f, 0.1f, 0.1f);
+        p.Rotate(0.0f, m_scale, 0.0f);
+        p.WorldPos(0.0f, 0.0f, 3.0f);
+        p.SetCamera(m_pGameCamera->GetPos(), m_pGameCamera->GetTarget(), m_pGameCamera->GetUp());
+        m_pLightingEffect->SetWVP(p.GetWVPTrans());
+        m_pLightingEffect->SetWorldMatrix(p.GetWorldTrans());
+        p.SetCamera(m_spotLight.Position, m_spotLight.Direction, Vector3f(0.0f, 1.0f, 0.0f));
+        m_pLightingEffect->SetLightWVP(p.GetWVPTrans());
+
+        m_pMesh->Render();
     }
 
     virtual void IdleCB()
@@ -151,9 +183,9 @@ public:
     virtual void KeyboardCB(unsigned char Key, int x, int y)
     {
         switch (Key) {
-        case 'q':
-            glutLeaveMainLoop();
-            break;
+            case 'q':
+                glutLeaveMainLoop();
+                break;
         }
     }
 
@@ -165,14 +197,15 @@ public:
 
 private:
 
-    LightingTechnique* m_pEffect;
-    ShadowMapTechnique* m_pShadowMapTech;
+    LightingTechnique* m_pLightingEffect;
+    ShadowMapTechnique* m_pShadowMapEffect;
     Camera* m_pGameCamera;
     float m_scale;
     SpotLight m_spotLight;
     Mesh* m_pMesh;
     Mesh* m_pQuad;
     ShadowMapFBO m_shadowMapFBO;
+    Texture* m_pGroundTex;
 };
 
 
